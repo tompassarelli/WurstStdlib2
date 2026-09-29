@@ -234,8 +234,7 @@ public function oskeytypeToIndex(oskeytype object) returns int
 	return object.getTCHandleId()
 
 public function oskeytypeFromIndex(int index) returns oskeytype
-	typecastdata.saveFogState(0,ConvertFogState(index))
-	return typecastdata.loadOskeytype(0)
+	return ConvertOsKeyType(index)
 
 public function booleanToIndex(boolean u) returns int
 	return u ? 1 : 0
@@ -254,4 +253,3 @@ public function int.toItemTag() returns itemTag
 
 public function int.toLoadoutSlot() returns loadoutslot
 	return ConvertLoadoutSlot(this)
-

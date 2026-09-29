@@ -1,0 +1,9 @@
+package TypeCastingTests
+
+@Test public function osKeyCodesRoundTrip()
+    GetHandleId(oskeytypeFromIndex(55)).assertEquals(55)
+    GetHandleId(oskeytypeFromIndex(56)).assertEquals(56)
+    GetHandleId(oskeytypeFromIndex(65)).assertEquals(65)
+    GetHandleId(oskeytypeFromIndex(76)).assertEquals(76)
+    GetHandleId(oskeytypeFromIndex(112)).assertEquals(112)
+    GetHandleId(oskeytypeFromIndex(117)).assertEquals(117)
