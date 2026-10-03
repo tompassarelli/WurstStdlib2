@@ -48,3 +48,155 @@ function binary32Infinity() returns real
 	for i = 1 to 6
 		result *= result
 	return result
+
+/**
+ * Computes a * b + c with one binary32 rounding, nearest with ties to even.
+ * All three inputs must be finite, already-representable binary32 values.
+ * The exact product may overflow or underflow binary32 before cancellation.
+ * NaN and infinity inputs are outside this function's contract.
+ *
+ * Integer limbs retain the product and cancellation bits on both binary32
+ * and binary64 real runtimes. No intermediate real multiplication is rounded.
+ * Preserving subnormals requires a runtime that does not flush them to zero.
+ */
+public function fusedMultiplyAddFloat32(real a, real b, real c) returns real
+	if a == 0. or b == 0.
+		return a * b + c
+	let left = decomposeBinary32(a)
+	let right = decomposeBinary32(b)
+	let product = multiplyBinary32Significands(left.significand, right.significand)
+	// Leave one carry bit above the product and 23 exact zero bits below it.
+	var magnitude = binary32Limbs(product.high div 2,
+		(product.high mod 2) * 8388608 + product.low div 2,
+		(product.low mod 2) * 8388608)
+	var scale = left.exponent + right.exponent - 23
+	var negative = (a < 0.) != (b < 0.)
+	if c != 0.
+		let addend = decomposeBinary32(c)
+		var other = binary32Limbs(addend.significand div 2,
+			(addend.significand mod 2) * 8388608, 0)
+		let otherScale = addend.exponent - 47
+		if scale < otherScale
+			magnitude = magnitude.shiftRightJam(otherScale - scale)
+			scale = otherScale
+		else
+			other = other.shiftRightJam(scale - otherScale)
+		if negative == (c < 0.)
+			magnitude = magnitude.add(other)
+		else if magnitude.lessThan(other)
+			magnitude = other.subtract(magnitude)
+			negative = c < 0.
+		else
+			magnitude = magnitude.subtract(other)
+	return magnitude.roundBinary32(scale, negative)
+
+// Three base-2^24 limbs. Arithmetic on each limb stays within signed int range.
+tuple binary32Limbs(int high, int middle, int low)
+tuple binary32Parts(int significand, int exponent)
+tuple binary32Product(int high, int low)
+
+function decomposeBinary32(real value) returns binary32Parts
+	var normalized = value < 0. ? -value : value
+	var exponent = -23
+	while normalized >= 2.
+		normalized *= 0.5
+		exponent += 1
+	while normalized < 1.
+		normalized *= 2.
+		exponent -= 1
+	return binary32Parts(R2I(normalized * 8388608.), exponent)
+
+function multiplyBinary32Significands(int a, int b) returns binary32Product
+	// Twelve-bit factors keep every partial product within signed int range.
+	let aLow = a mod 4096
+	let bLow = b mod 4096
+	let aHigh = a div 4096
+	let bHigh = b div 4096
+	let first = aLow * bLow
+	let second = first div 4096 + aHigh * bLow + aLow * bHigh
+	return binary32Product(aHigh * bHigh + second div 4096,
+		first mod 4096 + (second mod 4096) * 4096)
+
+function binary32Limbs.shiftRightJam(int count) returns binary32Limbs
+	var result = this
+	if count >= 72
+		return binary32Limbs(0, 0, (this.high != 0 or this.middle != 0 or this.low != 0) ? 1 : 0)
+	var remaining = count
+	while remaining >= 24
+		let lost = result.low != 0
+		result = binary32Limbs(0, result.high, result.middle)
+		if lost and result.low mod 2 == 0
+			result.low += 1
+		remaining -= 24
+	for i = 1 to remaining
+		let lost = result.low mod 2 != 0
+		result = binary32Limbs(result.high div 2,
+			result.middle div 2 + (result.high mod 2) * 8388608,
+			result.low div 2 + (result.middle mod 2) * 8388608)
+		if lost and result.low mod 2 == 0
+			result.low += 1
+	return result
+
+function binary32Limbs.add(binary32Limbs other) returns binary32Limbs
+	let lowSum = this.low + other.low
+	let middleSum = this.middle + other.middle + lowSum div 16777216
+	return binary32Limbs(this.high + other.high + middleSum div 16777216,
+		middleSum mod 16777216, lowSum mod 16777216)
+
+function binary32Limbs.lessThan(binary32Limbs other) returns boolean
+	return this.high < other.high or (this.high == other.high and
+		(this.middle < other.middle or (this.middle == other.middle and this.low < other.low)))
+
+// The receiver must be at least as large as other.
+function binary32Limbs.subtract(binary32Limbs other) returns binary32Limbs
+	var lowDifference = this.low - other.low
+	var middleDifference = this.middle - other.middle
+	var highDifference = this.high - other.high
+	if lowDifference < 0
+		lowDifference += 16777216
+		middleDifference -= 1
+	if middleDifference < 0
+		middleDifference += 16777216
+		highDifference -= 1
+	return binary32Limbs(highDifference, middleDifference, lowDifference)
+
+function binary32BitLength(int value) returns int
+	var remaining = value
+	var result = 0
+	while remaining != 0
+		remaining = remaining div 2
+		result += 1
+	return result
+
+function binary32Limbs.roundBinary32(int scale, boolean negative) returns real
+	let bits = this.high != 0 ? 48 + binary32BitLength(this.high) :
+		(this.middle != 0 ? 24 + binary32BitLength(this.middle) : binary32BitLength(this.low))
+	if bits == 0
+		return 0.
+	var shift = bits - 24
+	if scale + shift < -149
+		shift = -149 - scale
+	var rounded = this.low
+	var resultScale = scale
+	if shift >= 2
+		let truncated = this.shiftRightJam(shift - 2)
+		rounded = truncated.middle * 4194304 + truncated.low div 4
+		let remainder = truncated.low mod 4
+		if remainder > 2 or (remainder == 2 and rounded mod 2 != 0)
+			rounded += 1
+		resultScale += shift
+	else if shift == 1
+		rounded = this.middle * 8388608 + this.low div 2
+		if this.low mod 2 != 0 and rounded mod 2 != 0
+			rounded += 1
+		resultScale += 1
+	if resultScale + binary32BitLength(rounded) > 128
+		return negative ? -binary32Infinity() : binary32Infinity()
+	var result = rounded * 1.
+	if resultScale < 0
+		for i = 1 to -resultScale
+			result *= 0.5
+	else
+		for i = 1 to resultScale
+			result *= 2.
+	return negative ? -result : result
