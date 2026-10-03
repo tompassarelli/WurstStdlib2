@@ -1,0 +1,58 @@
+package Binary32Tests
+import NoWurst
+import Binary32
+import Wurstunit
+
+// Execute these functions in emitted Lua too: the compiletime interpreter's
+// binary32 arithmetic rounds inputs before roundToFloat32 can examine them.
+@Test public function subtractionRoundsExactly()
+	let difference = 0.7562744617462158 - 0.07999999821186066
+	(difference.roundToFloat32() == 0.6762744784355164).assertTrue()
+	((-difference).roundToFloat32() == -0.6762744784355164).assertTrue()
+
+@Test public function halfwayUsesEvenSignificand()
+	let halfUlp = powerOfTwo(-24)
+	((1. + halfUlp).roundToFloat32() == 1.).assertTrue()
+	((1. + 3. * halfUlp).roundToFloat32() == 1. + 4. * halfUlp).assertTrue()
+	((-1. - halfUlp).roundToFloat32() == -1.).assertTrue()
+	((-1. - 3. * halfUlp).roundToFloat32() == -1. - 4. * halfUlp).assertTrue()
+
+@Test public function roundingCarriesIntoNextExponent()
+	((2. - powerOfTwo(-24)).roundToFloat32() == 2.).assertTrue()
+	((16777216. + 1.).roundToFloat32() == 16777216.).assertTrue()
+	((16777216. + 3.).roundToFloat32() == 16777220.).assertTrue()
+
+@Test public function tinyAndSubnormalValues()
+	(0.00000001.roundToFloat32() == 0.00000000999999993922529029077850282192230224609375).assertTrue()
+	let quantum = powerOfTwo(-149)
+	(quantum.roundToFloat32() == quantum).assertTrue()
+	((quantum * 0.5).roundToFloat32() == 0.).assertTrue()
+	((quantum * 1.5).roundToFloat32() == quantum * 2.).assertTrue()
+	((quantum * 2.5).roundToFloat32() == quantum * 2.).assertTrue()
+	((-quantum * 1.5).roundToFloat32() == -quantum * 2.).assertTrue()
+	let minimumNormal = powerOfTwo(-126)
+	((minimumNormal - quantum * 0.5).roundToFloat32() == minimumNormal).assertTrue()
+	(powerOfTwo(-200).roundToFloat32() == 0.).assertTrue()
+
+@Test public function rangeAndNonfiniteValues()
+	let lastSpacing = powerOfTwo(104)
+	let maximum = 16777215. * lastSpacing
+	(maximum.roundToFloat32() == maximum).assertTrue()
+	let infinity = powerOfTwo(1023) * 2.
+	((16777215.5 * lastSpacing).roundToFloat32() == infinity).assertTrue()
+	((-16777215.5 * lastSpacing).roundToFloat32() == -infinity).assertTrue()
+	(infinity.roundToFloat32() == infinity).assertTrue()
+	((-infinity).roundToFloat32() == -infinity).assertTrue()
+	let nan = infinity - infinity
+	(nan.roundToFloat32() != nan.roundToFloat32()).assertTrue()
+	(0.0.roundToFloat32() == 0.).assertTrue()
+
+function powerOfTwo(int exponent) returns real
+	var result = 1.
+	if exponent < 0
+		for i = 1 to -exponent
+			result *= 0.5
+	else
+		for i = 1 to exponent
+			result *= 2.
+	return result
