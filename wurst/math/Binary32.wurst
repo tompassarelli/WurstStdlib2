@@ -1,0 +1,50 @@
+package Binary32
+import NoWurst
+
+/**
+ * Rounds to the nearest IEEE 754 binary32 numerical value, with ties to even.
+ * The result remains a real; call after each operation that requires rounding.
+ *
+ * On a binary64 real runtime (Lua), this includes binary32
+ * subnormals, signed underflow to zero, and overflow to signed infinity.
+ * NaN and infinity pass through. NaN payloads are not part of this contract.
+ * On a binary32 real runtime (Jass and the compiletime interpreter), inputs
+ * have already been rounded; this cannot recover precision lost before the
+ * call. A runtime that flushes subnormals
+ * to zero cannot preserve values below 2^-126 through this function.
+ *
+ * Uses at most 127 power-of-two scaling steps, independent of input magnitude.
+ */
+public function real.roundToFloat32() returns real
+	if this == 0. or this != this
+		return this
+	let negative = this < 0.
+	var significand = negative ? -this : this
+	var scale = 1.
+	var exponent = 0
+	while significand >= 2. and exponent < 127
+		significand *= 0.5
+		scale *= 2.
+		exponent += 1
+	if significand >= 2.
+		return negative ? -binary32Infinity() : binary32Infinity()
+	while significand < 1. and exponent > -126
+		significand *= 2.
+		scale *= 0.5
+		exponent -= 1
+	let units = significand * 8388608.
+	var rounded = R2I(units)
+	let remainder = units - rounded
+	if remainder > 0.5 or (remainder == 0.5 and rounded mod 2 != 0)
+		rounded += 1
+	if exponent == 127 and rounded == 16777216
+		return negative ? -binary32Infinity() : binary32Infinity()
+	let result = (rounded / 8388608.) * scale
+	return negative ? -result : result
+
+function binary32Infinity() returns real
+	// 2^(24 * 64) overflows both binary32 and binary64, without division by zero.
+	var result = 16777216.
+	for i = 1 to 6
+		result *= result
+	return result
